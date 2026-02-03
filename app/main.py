@@ -73,11 +73,20 @@ def home():
 @app.post("/predict")
 def predict_attack(packet: NetworkTraffic):
     if not model:
-        raise HTTPException(status_code=503, detail="Model is not loaded.")
+        raise HTTPException(status_code=503, detail="Model is not loaded. Please check server logs.")
 
-    prediction = model.predict([packet.features])[0]
+    # --- FIX: Filter out the 3 categorical columns (indices 1, 2, 3) ---
+    # The model was trained without 'protocol_type', 'service', and 'flag'.
+    # We must remove them from the input to match the 38 features the model expects.
+    model_input = [
+        val for i, val in enumerate(packet.features) 
+        if i not in [1, 2, 3]
+    ]
+
+    # Predict using the filtered (38-feature) input
+    prediction = model.predict([model_input])[0]
     
-    # --- FIX 3: Logic Bug Fixed (Block anything that is not 0) ---
+    # Logic: 0 = Normal, 1 = Attack
     return {
         "prediction": int(prediction),
         "status": "Normal" if prediction == 0 else "🚨 ATTACK DETECTED",
