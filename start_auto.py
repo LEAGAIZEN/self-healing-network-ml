@@ -1,29 +1,30 @@
 import pandas as pd
 import os
-import json
+import sys
 
 # ==============================
-# 1. EVIDENTLY IMPORTS (FIXED)
+# 1. SAFE EVIDENTLY IMPORTS
 # ==============================
+EVIDENTLY_AVAILABLE = False
 try:
     from evidently.report import Report
     from evidently.metric_preset import DataDriftPreset
-except ImportError:
-    # Fallback for older versions or slightly different installs
-    from evidently.report import Report
-    from evidently.metrics import DataDriftPreset
+    EVIDENTLY_AVAILABLE = True
+    print("✅ Evidently AI Library Loaded Successfully.")
+except ImportError as e:
+    print(f"⚠️ DRIFT MODULE WARNING: Could not import evidently ({e}).")
+    print("   -> Drift detection will be SKIPPED, but the server will run.")
+    EVIDENTLY_AVAILABLE = False
 
 # ==============================
 # 2. PATH SETUP
 # ==============================
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(os.path.dirname(CURRENT_DIR))
-
-# Dataset paths
 TRAIN_DATA_PATH = os.path.join(PROJECT_ROOT, "data", "raw", "KDDTrain+.txt")
 
 # ==============================
-# 3. NSL-KDD COLUMN NAMES
+# 3. COLUMN DEFINITIONS
 # ==============================
 COLUMNS = [
     "duration", "protocol_type", "service", "flag", "src_bytes", "dst_bytes", "land",
@@ -48,53 +49,44 @@ def check_data_drift(df_current: pd.DataFrame) -> bool:
     Detects data drift using Evidently.
     Returns True if drift is detected, else False.
     """
+    # --- SAFETY CHECK ---
+    if not EVIDENTLY_AVAILABLE:
+        print("⚠️ SKIPPING DRIFT CHECK: Evidently library is missing or broken.")
+        return False
+
     print("🔍 DRIFT CHECK STARTED")
 
-    # --------------------------
     # Load reference data
-    # --------------------------
     if not os.path.exists(TRAIN_DATA_PATH):
         print(f"❌ Training data not found: {TRAIN_DATA_PATH}")
         return False
 
-    ref_data = pd.read_csv(TRAIN_DATA_PATH, names=COLUMNS)
-
-    # --------------------------
-    # Select numerical columns only
-    # --------------------------
-    exclude_cols = ["protocol_type", "service", "flag", "label", "difficulty"]
-    # Filter only columns that exist in input data
-    available_cols = [c for c in COLUMNS if c in df_current.columns]
-    num_cols = [c for c in available_cols if c not in exclude_cols]
-
-    if not num_cols:
-        print("⚠️ No numerical columns found for drift check.")
-        return False
-
-    # Take a random sample for speed
-    ref_sample = ref_data[num_cols].sample(
-        n=min(5000, len(ref_data)), random_state=42
-    )
-
-    curr_sample = df_current[num_cols]
-
-    # --------------------------
-    # Run Evidently Drift Report
-    # --------------------------
     try:
+        ref_data = pd.read_csv(TRAIN_DATA_PATH, names=COLUMNS)
+
+        # Select numerical columns only
+        exclude_cols = ["protocol_type", "service", "flag", "label", "difficulty"]
+        available_cols = [c for c in COLUMNS if c in df_current.columns]
+        num_cols = [c for c in available_cols if c not in exclude_cols]
+
+        if not num_cols:
+            print("⚠️ No numerical columns found for drift check.")
+            return False
+
+        # Take a sample for speed
+        ref_sample = ref_data[num_cols].sample(n=min(5000, len(ref_data)), random_state=42)
+        curr_sample = df_current[num_cols]
+
+        # Run Report
         report = Report(metrics=[DataDriftPreset()])
         report.run(reference_data=ref_sample, current_data=curr_sample)
         
-        # Get result as a Python dictionary
+        # Parse Result
         result = report.as_dict()
-        
-        # Safe extraction of drift share
         drift_share = result["metrics"][0]["result"]["drift_share"]
+        
         print(f"📊 Drift Share: {drift_share:.4f}")
 
-        # --------------------------
-        # Decision Threshold
-        # --------------------------
         if drift_share > 0.3:
             print("🚨 DRIFT DETECTED — HEALING REQUIRED")
             return True
@@ -105,20 +97,3 @@ def check_data_drift(df_current: pd.DataFrame) -> bool:
     except Exception as e:
         print(f"❌ DRIFT CHECK FAILED: {e}")
         return False
-
-# ==============================
-# 5. STANDALONE TEST
-# ==============================
-if __name__ == "__main__":
-    print("Running standalone drift test...")
-    if os.path.exists(TRAIN_DATA_PATH):
-        # Create a fake 'current' batch by taking the tail of the training data
-        dummy_df = pd.read_csv(TRAIN_DATA_PATH, names=COLUMNS).tail(50)
-        check_data_drift(dummy_df)
-    else:
-        print("Data file not found for testing.")
-        
-# ==============================
-# 6. INSTALL EVIDENTLY
-# ==============================
-# !pip install evidently

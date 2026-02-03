@@ -1,21 +1,19 @@
 import pandas as pd
 import joblib
 import os
-import sys
 from sklearn.ensemble import RandomForestClassifier
 
-# --- 1. PATH SETUP (BULLETPROOF VERSION) ---
-# Grabs the folder where THIS file lives: .../src/model
+# --- PATH SETUP ---
+# Grabs the folder where THIS file lives
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-# Go up 2 levels to project root: .../self-healing-network-ml
+# Go up 2 levels to project root
 PROJECT_ROOT = os.path.dirname(os.path.dirname(CURRENT_DIR))
 
-# Updated Paths to point to 'data/raw'
+# Define Paths
 TRAIN_DATA_PATH = os.path.join(PROJECT_ROOT, "data", "raw", "KDDTrain+.txt")
-TEST_DATA_PATH = os.path.join(PROJECT_ROOT, "data", "raw", "KDDTest+.txt")
 MODEL_PATH = os.path.join(PROJECT_ROOT, "src", "model", "nsl_kdd_v1.pkl")
 
-# Define Columns
+# NSL-KDD Column Names
 COLUMNS = [
     "duration", "protocol_type", "service", "flag", "src_bytes", "dst_bytes", "land", 
     "wrong_fragment", "urgent", "hot", "num_failed_logins", "logged_in", 
@@ -30,36 +28,37 @@ COLUMNS = [
     "dst_host_srv_rerror_rate", "label", "difficulty"
 ]
 
-def train_model():
-    print(f"🚀 Starting Retraining Pipeline...")
-    print(f"DEBUG: Loading training data from {TRAIN_DATA_PATH}")
-
-    # 1. Load Data
+def train_model(new_data=None):
+    print(f"🚀 TRAINING: Loading baseline data from {TRAIN_DATA_PATH}...")
+    
     if not os.path.exists(TRAIN_DATA_PATH):
-        raise FileNotFoundError(f"Training data not found at {TRAIN_DATA_PATH}")
+        print(f"❌ Error: Training data not found at {TRAIN_DATA_PATH}")
+        return
 
-    df_train = pd.read_csv(TRAIN_DATA_PATH, names=COLUMNS)
-    df_test = pd.read_csv(TEST_DATA_PATH, names=COLUMNS)
+    # 1. Load Original Data
+    df = pd.read_csv(TRAIN_DATA_PATH, names=COLUMNS)
     
-    # Combine them (Simulating "Learning from new data")
-    # In a real system, you would append only the *new* drifted data.
-    full_df = pd.concat([df_train, df_test.sample(2000)]) 
+    # 2. Integrate New Knowledge (Self-Healing)
+    if new_data is not None and not new_data.empty:
+        print(f"🧠 LEARNING: Integrating {len(new_data)} new attack packets into the brain...")
+        # Assume these new packets are attacks (label them as 'neptune' or similar)
+        new_data['label'] = "neptune" 
+        df = pd.concat([df, new_data], ignore_index=True)
+
+    # 3. Preprocessing
+    # Drop non-numerical columns
+    X = df.drop(["protocol_type", "service", "flag", "label", "difficulty"], axis=1, errors='ignore')
+    # Convert Labels: Normal=0, Everything else=1
+    y = df["label"].apply(lambda x: 0 if x == "normal" else 1)
     
-    # 2. Preprocessing
-    # Drop categorical columns for MVP simplicity
-    X = full_df.drop(["protocol_type", "service", "flag", "label", "difficulty"], axis=1)
-    
-    # Convert labels: Normal=0, Attack=1
-    y = full_df["label"].apply(lambda x: 0 if x == "normal" else 1)
-    
-    # 3. Train
-    print("🧠 Training Random Forest Model...")
-    clf = RandomForestClassifier(n_estimators=10, max_depth=5)
+    # 4. Train
+    print("🏋️ TRAINING: Fitting Random Forest...")
+    clf = RandomForestClassifier(n_estimators=20, max_depth=10, random_state=42)
     clf.fit(X, y)
     
-    # 4. Save
+    # 5. Save
     joblib.dump(clf, MODEL_PATH)
-    print(f"💾 Model successfully saved to {MODEL_PATH}")
+    print(f"✅ COMPLETE: New model saved to {MODEL_PATH}")
 
 if __name__ == "__main__":
     train_model()
