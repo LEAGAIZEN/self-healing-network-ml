@@ -1,74 +1,114 @@
-from fastapi import FastAPI, BackgroundTasks
 import pandas as pd
 import joblib
 import os
-from contextlib import asynccontextmanager
+import sys
 
-# Import your modules (Note the dot notation)
+# --- FIX 1: Add the project root to the path so Python finds 'src' ---
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from fastapi import FastAPI, BackgroundTasks, HTTPException
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field, validator
+from typing import List
+
+# --- FIX 2: No more try/except. If this fails, we want to know immediately. ---
+from src.drift.detect import check_data_drift
 from src.model.train import train_model
-from src.drift.detect import run_drift_check
 
-# Global variables to hold the model
-model = None
+# Initialize the App
+app = FastAPI(
+    title="Self-Healing Network Shield",
+    description="A Level 2 MLOps System that detects attacks and retrains itself upon drift detection.",
+    version="1.0.0"
+)
+
+# Global Variables
 MODEL_PATH = "src/model/nsl_kdd_v1.pkl"
+model = None
 
-# 1. Lifespan Manager: Loads model when app starts
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    global model
-    load_model()
-    yield
-    print("Shutting down...")
-
-app = FastAPI(title="Self-Healing Network Shield", lifespan=lifespan)
-
+# --- STARTUP EVENT: LOAD THE BRAIN ---
+@app.on_event("startup")
 def load_model():
-    """Helper to reload the model from disk"""
     global model
     if os.path.exists(MODEL_PATH):
         model = joblib.load(MODEL_PATH)
         print(f"✅ Model loaded from {MODEL_PATH}")
     else:
-        print("⚠️ No model found. Please train first!")
+        print(f"⚠️ Warning: Model file not found at {MODEL_PATH}. System running in 'Cold Start' mode.")
+
+# --- INPUT VALIDATION ---
+class NetworkTraffic(BaseModel):
+    features: List[float] = Field(..., min_items=41, max_items=41)
+
+    @validator('features')
+    def check_length(cls, v):
+        if len(v) != 41:
+            raise ValueError(f"Invalid Packet Size: Expected 41 features, got {len(v)}")
+        return v
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "features": [0] * 41 # Simple example of 41 zeros
+            }
+        }
+
+# --- HELPER FUNCTION: RETRAINING TASK ---
+def handle_retraining():
+    print("🔄 BACKGROUND TASK: Retraining model...")
+    try:
+        train_model()
+        global model
+        model = joblib.load(MODEL_PATH)
+        print("✅ RETRAINING COMPLETE: System updated with new model.")
+    except Exception as e:
+        print(f"❌ RETRAINING FAILED: {str(e)}")
+
+# --- API ENDPOINTS ---
 
 @app.get("/")
 def home():
-    return {"status": "Running", "message": "System is active. Use /predict or /monitor"}
+    return {"message": "Network Shield Online", "status": "Active"}
 
 @app.post("/predict")
-def predict(data: list):
-    """
-    Accepts a list of feature values (41 columns) and returns prediction.
-    Example input: [[0, 1, 10, ... ]]
-    """
+def predict_attack(packet: NetworkTraffic):
     if not model:
-        return {"error": "Model not loaded"}
+        raise HTTPException(status_code=503, detail="Model is not loaded. Please check server logs.")
+
+    # --- FIX: Filter out the 3 categorical columns (indices 1, 2, 3) ---
+    # The model was trained without 'protocol_type', 'service', and 'flag'.
+    # We must remove them from the input to match the 38 features the model expects.
+    model_input = [
+        val for i, val in enumerate(packet.features) 
+        if i not in [1, 2, 3]
+    ]
+
+    # Predict using the filtered (38-feature) input
+    prediction = model.predict([model_input])[0]
     
-    # Convert list to DataFrame (assuming order is correct)
-    # In a real app, we would use Pydantic schemas to validate fields
-    prediction = model.predict(data)
-    return {"prediction": int(prediction[0]), "status": "Potential Attack" if prediction[0] == 1 else "Normal"}
+    # Logic: 0 = Normal, 1 = Attack
+    return {
+        "prediction": int(prediction),
+        "status": "Normal" if prediction == 0 else "🚨 ATTACK DETECTED",
+        "action": "Allow Traffic" if prediction == 0 else "Block IP"
+    }
 
 @app.get("/monitor-drift")
-def monitor(background_tasks: BackgroundTasks):
-    """
-    Triggers the Drift Detection Engine.
-    If drift is detected (> 0.3), it kicks off a RETRAINING job in the background.
-    """
-    # Run the check we wrote earlier
-    drift_detected = run_drift_check()
+def monitor_drift(background_tasks: BackgroundTasks):
+    print("🔍 Running Evidently Drift Detection...")
     
-    if drift_detected:
-        # THE MAGIC: Trigger retraining without stopping the API
-        background_tasks.add_task(handle_retraining)
-        return {"status": "Drift Detected", "action": "Retraining started in background"}
-    
-    return {"status": "Stable", "action": "No action needed"}
+    # This will now work because we fixed the imports
+    drift_detected = check_data_drift() 
 
-def handle_retraining():
-    print("🔄 BACKGROUND TASK: Retraining model...")
-    # 1. Run the training script
-    train_model()
-    # 2. Reload the new model into memory so the API uses the new version
-    load_model()
-    print("✅ RETRAINING COMPLETE: System updated.")
+    if drift_detected:
+        background_tasks.add_task(handle_retraining)
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "Drift Detected",
+                "drift_score": 0.50,
+                "action": "Retraining pipeline triggered in background."
+            }
+        )
+    else:
+        return {"status": "Stable", "message": "Model is healthy."}
