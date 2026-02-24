@@ -1,4 +1,4 @@
-# Self-Healing Network ML
+<img width="436" height="738" alt="image" src="https://github.com/user-attachments/assets/4adc3d15-190c-4d7c-b2da-6b569bc40dc9" /># Self-Healing Network ML
 
 ## Project Overview
 This project aims to develop a self-healing network using machine learning techniques. The goal is to create a system that can automatically detect, diagnose, and repair faults in network infrastructures, leading to improved uptime and performance.
@@ -77,4 +77,4 @@ We welcome contributions to this project. To contribute:
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## Contact Information
-For inquiries, please reach out to [Your Name](mailto:your-email@example.com).
+For inquiries, please reach out to [Bijendra Yadav](mailto:your-bijendrayadav0724@gmail.com).
