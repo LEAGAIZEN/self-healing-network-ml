@@ -77,4 +77,4 @@ We welcome contributions to this project. To contribute:
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## Contact Information
-For inquiries, please reach out to [Bijendra Yadav](mailto:your-bijendrayadav0724@gmail.com).
+For inquiries, please reach out to [Bijendra Yadav](mailto:your-bijendrayadav0724@gmail.com) or [Ritesh Mahara](mailto:riteshmahara77@gmail.com).
